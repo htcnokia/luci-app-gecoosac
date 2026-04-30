@@ -17,10 +17,12 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
-            gettext git java-propose-classpath libelf-dev libncurses5-dev \
-            libssl-dev python3 python3-pip python3-pyelftools python3-setuptools \
-            python3-pysocks python3-unidecode quilt rsync subversion swig time unzip wget zlib1g-dev
+          sudo apt-get install -y \
+            build-essential ccache ecj fastjar file g++ gawk gettext git \
+            java-propose-classpath libelf-dev libncurses5-dev libssl-dev \
+            python3 python3-pip python3-pyelftools python3-setuptools \
+            python3-socks python3-unidecode \
+            quilt rsync subversion swig time unzip wget zlib1g-dev
 
       - name: Update feeds
         run: |
@@ -30,30 +32,27 @@ jobs:
       - name: Clone luci-app-gecoosac
         run: git clone --depth=1 https://github.com/laipeng668/luci-app-gecoosac package/luci-app-gecoosac
 
-      - name: Pre-build host tools (fix libdeflate-gzip & lua)
+      - name: Pre-build toolchain
         run: |
           make -j$(nproc) tools/install V=s
           make -j$(nproc) toolchain/install V=s
-          make -j2 package/utils/lua/host/compile V=s || true
 
-      - name: Configure
+      - name: Configure (non-interactive)
         run: |
-          echo "CONFIG_TARGET_qualcommax=y" >> .config
+          export TERM=xterm
+          export FORCE_UNSAFE_CONFIGURE=1
+          echo "CONFIG_TARGET_qualcommax=y" > .config
           echo "CONFIG_TARGET_qualcommax_ipq60xx=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-gecoosac=m" >> .config
           make defconfig
 
-      - name: Set terminal
-        run: |
-          echo "export TERM=xterm" >> ~/.bashrc
-          source ~/.bashrc
-
       - name: Compile luci-app-gecoosac
-        run: make package/luci-app-gecoosac/compile -j$(nproc) V=s
+        run: |
+          export TERM=xterm
+          make package/luci-app-gecoosac/compile -j$(nproc) V=s
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-gecoosac-ipq60xx
           path: bin/packages/aarch64_cortex-a53/luci/luci-app-gecoosac_*.apk
-          retention-days: 30
