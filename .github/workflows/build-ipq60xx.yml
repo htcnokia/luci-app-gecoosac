@@ -1,0 +1,42 @@
+name: Build luci-app-gecoosac for ZN-M2 (ipq60xx)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout ImmortalWrt Source
+        uses: actions/checkout@v4
+        with:
+          repository: immortalwrt/immortalwrt
+          ref: master                  # SNAPSHOT 分支使用 master
+
+      - name: Update feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Clone luci-app-gecoosac
+        run: git clone --depth=1 https://github.com/laipeng668/luci-app-gecoosac package/luci-app-gecoosac
+
+      - name: Configure
+        run: |
+          echo "CONFIG_TARGET_qualcommax=y" >> .config
+          echo "CONFIG_TARGET_qualcommax_ipq60xx=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-gecoosac=m" >> .config
+          make defconfig
+
+      - name: Compile Package
+        run: make package/luci-app-gecoosac/compile -j$(nproc) V=s
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-gecoosac-ipq60xx
+          path: bin/packages/aarch64_cortex-a53/luci/luci-app-gecoosac_*.apk
+          retention-days: 30
