@@ -2,19 +2,25 @@ name: Build luci-app-gecoosac for ZN-M2 (ipq60xx)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout ImmortalWrt Source
+      - name: Checkout ImmortalWrt
         uses: actions/checkout@v4
         with:
           repository: immortalwrt/immortalwrt
-          ref: master                  # SNAPSHOT 分支使用 master
+          ref: master
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+          gettext git java-propose-classpath libelf-dev libncurses5-dev \
+          libssl-dev python3 python3-pip python3-pyelftools python3-setuptools \
+          quilt rsync subversion swig time unzip wget zlib1g-dev
 
       - name: Update feeds
         run: |
@@ -24,6 +30,12 @@ jobs:
       - name: Clone luci-app-gecoosac
         run: git clone --depth=1 https://github.com/laipeng668/luci-app-gecoosac package/luci-app-gecoosac
 
+      - name: Pre-build host tools (fix libdeflate-gzip & lua)
+        run: |
+          make -j$(nproc) tools/install V=s
+          make -j$(nproc) toolchain/install V=s
+          make -j2 package/utils/lua/host/compile V=s || true
+
       - name: Configure
         run: |
           echo "CONFIG_TARGET_qualcommax=y" >> .config
@@ -31,7 +43,7 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-gecoosac=m" >> .config
           make defconfig
 
-      - name: Compile Package
+      - name: Compile luci-app-gecoosac
         run: make package/luci-app-gecoosac/compile -j$(nproc) V=s
 
       - name: Upload APK
