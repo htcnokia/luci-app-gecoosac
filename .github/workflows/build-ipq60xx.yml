@@ -1,4 +1,4 @@
-name: Build Gecoosac APK for IPQ60xx (ZST Version)
+name: Build Gecoosac APK for IPQ60xx (Final Fix)
 
 on:
   workflow_dispatch:
@@ -17,6 +17,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
+          # 针对 Ubuntu 24.04 优化的依赖包
           sudo apt-get install -y \
             build-essential clang flex bison g++ gawk gettext git \
             libncurses-dev libssl-dev python3-setuptools python3-dev rsync unzip \
@@ -24,13 +25,19 @@ jobs:
 
       - name: Download ImmortalWrt SDK
         run: |
-          # 动态匹配 zst 格式的 SDK
+          # 动态获取最新的 .tar.zst 格式 SDK
           BASE_URL="https://downloads.immortalwrt.org/snapshots/targets/qualcommax/ipq60xx/"
           SDK_FILENAME=$(wget -qO- $BASE_URL | grep -oE 'immortalwrt-sdk-[^">]+\.tar\.zst' | head -n 1)
+          
+          if [ -z "$SDK_FILENAME" ]; then
+            echo "Error: Cannot find SDK on $BASE_URL"
+            exit 1
+          fi
           
           echo "Found SDK: $SDK_FILENAME"
           wget "${BASE_URL}${SDK_FILENAME}" -O sdk.tar.zst
           
+          # 解压 zst 格式
           mkdir sdk
           zstd -d sdk.tar.zst -c | tar -xf - -C sdk --strip-components=1
 
@@ -38,18 +45,15 @@ jobs:
         run: |
           cd sdk
           
-          # 1. 更新 feeds
+          # 更新并安装基础 feeds
           ./scripts/feeds update -a
           ./scripts/feeds install luci-base
           
-          # 2. 准备插件目录
+          # 准备插件目录并排除 sdk 目录本身，防止递归拷贝报错
           mkdir -p package/luci-app-gecoosac
-          
-          # 3. 修复后的拷贝命令：排除 sdk 目录本身
-          # 使用 rsync 可以非常方便地排除特定文件夹
           rsync -av --exclude='sdk' ../* package/luci-app-gecoosac/
 
-          # 4. 强制配置为 APK 模式
+          # 写入配置：强制启用 APK 模式并选择该包
           cat > .config <<EOF
           CONFIG_TARGET_qualcommax=y
           CONFIG_TARGET_qualcommax_ipq60xx=y
@@ -62,10 +66,19 @@ jobs:
       - name: Compile
         run: |
           cd sdk
+          # 编译整个 package 目录，确保主程序 gecoosac 和界面包一起生成
           make package/luci-app-gecoosac/compile -j$(nproc) V=s
 
-      - name: Upload APK
+      - name: Debug Output
+        run: |
+          echo "Checking for generated APK files..."
+          find sdk/bin/packages/ -name "*.apk"
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-gecoosac-apk
-          path: sdk/bin/packages/**/luci-app-gecoosac*.apk
+          name: luci-app-gecoosac-apk-full
+          # 捕获所有相关的 apk 文件
+          path: |
+            sdk/bin/packages/**/luci-app-gecoosac*.apk
+            sdk/bin/packages/**/gecoosac*.apk
