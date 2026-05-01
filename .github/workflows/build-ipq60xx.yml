@@ -1,4 +1,4 @@
-name: Build Gecoosac APK for IPQ60xx (Fixed)
+name: Build Gecoosac APK for IPQ60xx (ZST Version)
 
 on:
   workflow_dispatch:
@@ -17,46 +17,33 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          # 移除 python3-distutils，替换为 python3-setuptools 和 python3-dev
           sudo apt-get install -y \
             build-essential clang flex bison g++ gawk gettext git \
             libncurses-dev libssl-dev python3-setuptools python3-dev rsync unzip \
-            zlib1g-dev swig wget file qdbus-qt5
+            zlib1g-dev swig wget file qdbus-qt5 zstd
 
       - name: Download ImmortalWrt SDK
         run: |
-          # 定义基础 URL
+          # 动态匹配 zst 格式的 SDK
           BASE_URL="https://downloads.immortalwrt.org/snapshots/targets/qualcommax/ipq60xx/"
+          SDK_FILENAME=$(wget -qO- $BASE_URL | grep -oE 'immortalwrt-sdk-[^">]+\.tar\.zst' | head -n 1)
           
-          # 自动抓取页面中以 'immortalwrt-sdk' 开头并以 '.tar.xz' 结尾的第一个链接
-          SDK_FILENAME=$(wget -qO- $BASE_URL | grep -oE 'immortalwrt-sdk-[^">]+\.tar\.xz' | head -n 1)
+          echo "Found SDK: $SDK_FILENAME"
+          wget "${BASE_URL}${SDK_FILENAME}" -O sdk.tar.zst
           
-          if [ -z "$SDK_FILENAME" ]; then
-            echo "错误：无法在 $BASE_URL 找到 SDK 下载链接！"
-            exit 1
-          fi
-          
-          echo "正在下载最新的 SDK: $SDK_FILENAME"
-          wget "${BASE_URL}${SDK_FILENAME}" -O sdk.tar.xz
-          
-          # 解压
           mkdir sdk
-          tar -xf sdk.tar.xz -C sdk --strip-components=1
+          zstd -d sdk.tar.zst -c | tar -xf - -C sdk --strip-components=1
 
       - name: Add Package & Configure
         run: |
           cd sdk
-          
-          # 1. 更新 feeds（由于是独立插件，至少需要安装 luci-base 依赖）
           ./scripts/feeds update -a
           ./scripts/feeds install luci-base
           
-          # 2. 将 checkout 下来的源码移动到 package 目录（比重新 clone 快）
           mkdir -p package/luci-app-gecoosac
           cp -r ../* package/luci-app-gecoosac/
 
-          # 3. 强制配置为 APK 模式
-          # 注意：CONFIG_USE_APK=y 是关键
+          # 强制开启 APK 模式
           cat > .config <<EOF
           CONFIG_TARGET_qualcommax=y
           CONFIG_TARGET_qualcommax_ipq60xx=y
@@ -64,26 +51,15 @@ jobs:
           CONFIG_USE_APK=y
           EOF
           
-          # 扩展配置，确保依赖项正确补齐
           make defconfig
 
       - name: Compile
         run: |
           cd sdk
-          # 编译插件本身
           make package/luci-app-gecoosac/compile -j$(nproc) V=s
-
-      - name: Debug Output
-        run: |
-          echo "Listing all generated packages:"
-          find sdk/bin/ -name "*.apk" || echo "No .apk files found"
-          find sdk/bin/ -name "*.ipk" || echo "No .ipk files found"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-gecoosac-apk
-          # 使用通配符兼容所有可能出现的路径
-          path: |
-            sdk/bin/packages/**/luci-app-gecoosac*.apk
-            sdk/bin/packages/**/luci-app-gecoosac*.ipk
+          path: sdk/bin/packages/**/luci-app-gecoosac*.apk
