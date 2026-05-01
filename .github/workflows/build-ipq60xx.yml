@@ -1,77 +1,54 @@
-name: Build luci-app-gecoosac (APK, minimal)
+name: Build Gecoosac APK for IPQ60xx
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 手动点击运行
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout ImmortalWrt
+      - name: Checkout Source
         uses: actions/checkout@v4
-        with:
-          repository: immortalwrt/immortalwrt
-          ref: master
 
-      - name: Install dependencies
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential ccache g++ gawk gettext git \
-            libncurses5-dev libssl-dev python3 python3-distutils \
-            rsync unzip wget zlib1g-dev file
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses-dev libssl-dev python3-distutils rsync unzip zlib1g-dev swig wget
 
-      - name: Update feeds
+      - name: Download ImmortalWRT SDK
         run: |
+          # 针对你的 ipq60xx 架构下载最新的 SDK
+          SDK_URL="https://downloads.immortalwrt.org/snapshots/targets/qualcommax/ipq60xx/immortalwrt-sdk-qualcommax-ipq60xx_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
+          wget $SDK_URL -O sdk.tar.xz
+          mkdir sdk && tar -xf sdk.tar.xz -C sdk --strip-components=1
+
+      - name: Configure SDK & Add Package
+        run: |
+          cd sdk
+          # 更新 feeds (APK 格式需要最新的脚本支持)
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-
-      - name: Clone luci-app-gecoosac
-        run: |
-          git clone --depth=1 https://github.com/laipeng668/luci-app-gecoosac package/luci-app-gecoosac
-
-      # 🔥 关键：先生成 config（避免 menuconfig）
-      - name: Configure (APK minimal)
-        run: |
-          export TERM=xterm
-          export FORCE_UNSAFE_CONFIGURE=1
-
-          cat > .config <<EOF
-CONFIG_TARGET_qualcommax=y
-CONFIG_TARGET_qualcommax_ipq60xx=y
-
-# 只编译这个包
-CONFIG_PACKAGE_luci-app-gecoosac=m
-
-# 🔥 启用 APK
-CONFIG_PACKAGE_MANAGER_APK=y
-
-# ❗ 不编译固件
-CONFIG_TARGET_ROOTFS_INITRAMFS=n
-CONFIG_TARGET_IMAGES=n
-EOF
-
+          
+          # 将当前仓库源码放入 SDK package 目录
+          mkdir -p package/luci-app-gecoosac
+          cp -r ../* package/luci-app-gecoosac/
+          
+          # 生成默认配置并强制启用该包的编译
           make defconfig
+          echo "CONFIG_PACKAGE_luci-app-gecoosac=m" >> .config
+          # 必须开启 APK 支持 (部分 SDK 默认可能还是 IPK)
+          echo "CONFIG_USE_APK=y" >> .config
 
-      # 🔥 必须但最小化
-      - name: Build tools & toolchain
+      - name: Compile Package
         run: |
-          make -j$(nproc) tools/install
-          make -j$(nproc) toolchain/install
+          cd sdk
+          # 仅编译 luci-app-gecoosac 及其依赖
+          make package/luci-app-gecoosac/compile V=s
 
-      # ✅ 只编译目标包
-      - name: Compile luci-app-gecoosac only
-        run: |
-          make package/luci-app-gecoosac/compile -j$(nproc) V=s
-
-      # 🔍 Debug（强烈建议保留）
-      - name: Find output
-        run: |
-          find bin/ -name "*gecoosac*"
-
-      - name: Upload APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-gecoosac-apk
-          path: bin/packages/**/*gecoosac*.apk
+          # 路径指向 SDK 编译输出目录下的 .apk 文件
+          path: sdk/bin/packages/aarch64_cortex-a53/base/*.apk
