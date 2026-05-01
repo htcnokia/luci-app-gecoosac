@@ -1,50 +1,83 @@
-name: Build OpenWrt APK
+name: Build Gecoosac APK with Chinese i18n
 
 on:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout Source
         uses: actions/checkout@v4
 
-      - name: Preparation
+      - name: Install Dependencies
         run: |
-          # 更新系统环境
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gettext git \
+            libncurses-dev libssl-dev python3-setuptools python3-dev rsync unzip \
+            zlib1g-dev swig wget file qdbus-qt5 zstd
 
-      - name: Download SDK
+      - name: Download ImmortalWrt SDK
         run: |
-          # 下载支持 APK 格式的 SDK (以 aarch64_cortex-a53 为例)
-          # 注意：URL 必须是包含 apk 支持的 snapshot 版本
-          SDK_URL="https://downloads.openwrt.org/snapshots/targets/rockchip/armv8/openwrt-sdk-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
-          wget $SDK_URL -O sdk.tar.xz
-          mkdir sdk && tar -xf sdk.tar.xz -C sdk --strip-components=1
-
-      - name: Add Package to SDK
-        run: |
-          cd sdk
-          # 将当前源码放入 SDK 的 package 目录
-          mkdir -p package/luci-app-gecoosac
-          cp -r ../* package/luci-app-gecoosac/
+          BASE_URL="https://downloads.immortalwrt.org/snapshots/targets/qualcommax/ipq60xx/"
+          SDK_FILENAME=$(wget -qO- $BASE_URL | grep -oE 'immortalwrt-sdk-[^">]+\.tar\.zst' | head -n 1)
           
-          # 更新 feeds
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          if [ -z "$SDK_FILENAME" ]; then
+            echo "Error: Cannot find SDK on $BASE_URL"
+            exit 1
+          fi
+          
+          echo "Found SDK: $SDK_FILENAME"
+          wget "${BASE_URL}${SDK_FILENAME}" -O sdk.tar.zst
+          
+          mkdir sdk
+          zstd -d sdk.tar.zst -c | tar -xf - -C sdk --strip-components=1
 
-      - name: Configure and Compile
+      - name: Add Package & Configure
         run: |
           cd sdk
-          # 选择编译该插件
-          make defconfig
-          echo "CONFIG_PACKAGE_luci-app-gecoosac=m" >> .config
-          make package/luci-app-gecoosac/compile V=s
+          
+          # 1. 更新并安装基础 feeds，这是生成语言包的前提
+          ./scripts/feeds update -a
+          ./scripts/feeds install luci-base
+          
+          # 2. 准备插件目录，排除自身避免死循环
+          mkdir -p package/luci-app-gecoosac
+          rsync -av --exclude='sdk' ../* package/luci-app-gecoosac/
 
-      - name: Upload Artifact
+          # 3. 强制配置：关键点是增加 CONFIG_PACKAGE_luci-i18n-gecoosac-zh-cn
+          cat > .config <<EOF
+          CONFIG_TARGET_qualcommax=y
+          CONFIG_TARGET_qualcommax_ipq60xx=y
+          CONFIG_PACKAGE_luci-app-gecoosac=m
+          CONFIG_PACKAGE_luci-i18n-gecoosac-zh-cn=m
+          CONFIG_USE_APK=y
+          EOF
+          
+          # 让 SDK 自动补齐依赖项，包括语言包的关联
+          make defconfig
+
+      - name: Compile
+        run: |
+          cd sdk
+          # 编译该目录下的所有包，包括对应的 i18n 包
+          make package/luci-app-gecoosac/compile -j$(nproc) V=s
+
+      - name: Debug Output
+        run: |
+          echo "Checking for all APK files (including i18n)..."
+          find sdk/bin/packages/ -name "*.apk"
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-apk
-          path: sdk/bin/packages/*/luci/*.apk
+          name: luci-app-gecoosac-apk-full-with-zh
+          path: |
+            sdk/bin/packages/**/gecoosac*.apk
+            sdk/bin/packages/**/luci-app-gecoosac*.apk
+            sdk/bin/packages/**/luci-i18n-gecoosac-zh-cn*.apk
