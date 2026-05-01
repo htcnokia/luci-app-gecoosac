@@ -17,9 +17,10 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
+          # 移除 python3-distutils，替换为 python3-setuptools 和 python3-dev
           sudo apt-get install -y \
             build-essential clang flex bison g++ gawk gettext git \
-            libncurses-dev libssl-dev python3-distutils rsync unzip \
+            libncurses-dev libssl-dev python3-setuptools python3-dev rsync unzip \
             zlib1g-dev swig wget file qdbus-qt5
 
       - name: Download ImmortalWrt SDK
