@@ -1,0 +1,50 @@
+name: Build OpenWrt APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Preparation
+        run: |
+          # 更新系统环境
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip
+
+      - name: Download SDK
+        run: |
+          # 下载支持 APK 格式的 SDK (以 aarch64_cortex-a53 为例)
+          # 注意：URL 必须是包含 apk 支持的 snapshot 版本
+          SDK_URL="https://downloads.openwrt.org/snapshots/targets/rockchip/armv8/openwrt-sdk-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
+          wget $SDK_URL -O sdk.tar.xz
+          mkdir sdk && tar -xf sdk.tar.xz -C sdk --strip-components=1
+
+      - name: Add Package to SDK
+        run: |
+          cd sdk
+          # 将当前源码放入 SDK 的 package 目录
+          mkdir -p package/luci-app-gecoosac
+          cp -r ../* package/luci-app-gecoosac/
+          
+          # 更新 feeds
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure and Compile
+        run: |
+          cd sdk
+          # 选择编译该插件
+          make defconfig
+          echo "CONFIG_PACKAGE_luci-app-gecoosac=m" >> .config
+          make package/luci-app-gecoosac/compile V=s
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-apk
+          path: sdk/bin/packages/*/luci/*.apk
