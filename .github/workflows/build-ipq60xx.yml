@@ -25,9 +25,21 @@ jobs:
 
       - name: Download ImmortalWrt SDK
         run: |
-          # 针对你的 ipq60xx 架构
-          SDK_URL="https://downloads.immortalwrt.org/snapshots/targets/qualcommax/ipq60xx/immortalwrt-sdk-qualcommax-ipq60xx_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
-          wget $SDK_URL -O sdk.tar.xz
+          # 定义基础 URL
+          BASE_URL="https://downloads.immortalwrt.org/snapshots/targets/qualcommax/ipq60xx/"
+          
+          # 自动抓取页面中以 'immortalwrt-sdk' 开头并以 '.tar.xz' 结尾的第一个链接
+          SDK_FILENAME=$(wget -qO- $BASE_URL | grep -oE 'immortalwrt-sdk-[^">]+\.tar\.xz' | head -n 1)
+          
+          if [ -z "$SDK_FILENAME" ]; then
+            echo "错误：无法在 $BASE_URL 找到 SDK 下载链接！"
+            exit 1
+          fi
+          
+          echo "正在下载最新的 SDK: $SDK_FILENAME"
+          wget "${BASE_URL}${SDK_FILENAME}" -O sdk.tar.xz
+          
+          # 解压
           mkdir sdk
           tar -xf sdk.tar.xz -C sdk --strip-components=1
 
