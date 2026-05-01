@@ -1,59 +1,68 @@
-name: Build Gecoosac APK for IPQ60xx
+name: Build Gecoosac APK for IPQ60xx (SDK)
 
 on:
   workflow_dispatch:
 
-# 解决 Node.js 弃用警告并允许 Actions 正常运行
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Source
+      - name: Checkout luci-app-gecoosac
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies
+      - name: Install Dependencies
         run: |
-          # 针对 2026 年的 Ubuntu 环境进行优化，强制忽略部分 apt 错误
-          sudo apt-get update || true
-          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-            gettext git libncurses-dev libssl-dev python3-distutils rsync unzip zlib1g-dev swig wget
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gettext git \
+            libncurses-dev libssl-dev python3-distutils rsync unzip \
+            zlib1g-dev swig wget file
 
-      - name: Download ImmortalWRT SDK
+      - name: Download ImmortalWrt SDK
         run: |
-          # 确保下载路径正确
           SDK_URL="https://downloads.immortalwrt.org/snapshots/targets/qualcommax/ipq60xx/immortalwrt-sdk-qualcommax-ipq60xx_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
-          wget --no-check-certificate $SDK_URL -O sdk.tar.xz
-          mkdir sdk && tar -xf sdk.tar.xz -C sdk --strip-components=1
+          wget $SDK_URL -O sdk.tar.xz
+          mkdir sdk
+          tar -xf sdk.tar.xz -C sdk --strip-components=1
 
-      - name: Configure SDK & Add Package
+      - name: Add Package & Configure
         run: |
           cd sdk
-          # 修复部分 SDK 环境下 feeds 报错的问题
+
+          # ✅ 只更新一次 feeds（SDK 必要）
           ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          
-          # 准备包源码
-          mkdir -p package/luci-app-gecoosac
-          cp -r ../* package/luci-app-gecoosac/ || true
-          
-          # 生成配置
-          make defconfig
-          echo "CONFIG_PACKAGE_luci-app-gecoosac=m" >> .config
-          # 关键：确保 APK 模式开启
-          echo "CONFIG_USE_APK=y" >> .config
+          ./scripts/feeds install luci-base
 
-      - name: Compile Package
+          # ✅ 正确放入 package
+          git clone https://github.com/laipeng668/luci-app-gecoosac package/luci-app-gecoosac
+
+          # ✅ 正确生成 config（顺序很重要）
+          cat > .config <<EOF
+CONFIG_TARGET_qualcommax=y
+CONFIG_TARGET_qualcommax_ipq60xx=y
+CONFIG_PACKAGE_luci-app-gecoosac=m
+
+# 🔥 启用 APK
+CONFIG_PACKAGE_MANAGER_APK=y
+EOF
+
+          make defconfig
+
+      - name: Compile (only package)
         run: |
           cd sdk
-          # 增加编译日志输出以便排错
-          make package/luci-app-gecoosac/compile V=s -j$(nproc)
+          make package/luci-app-gecoosac/compile -j$(nproc) V=s
 
-      - name: Upload APK Artifact
+      - name: Debug Output
+        run: |
+          find sdk/bin/ -name "*gecoosac*"
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-gecoosac-apk
-          # 更加通用的路径匹配，防止架构目录名不准
-          path: sdk/bin/packages/**/*.apk
+          path: sdk/bin/packages/**/*gecoosac*.apk
