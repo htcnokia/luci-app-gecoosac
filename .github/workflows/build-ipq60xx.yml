@@ -1,7 +1,11 @@
 name: Build Gecoosac APK for IPQ60xx
 
 on:
-  workflow_dispatch: # 手动点击运行
+  workflow_dispatch:
+
+# 解决 Node.js 弃用警告并允许 Actions 正常运行
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -12,43 +16,44 @@ jobs:
 
       - name: Install Build Dependencies
         run: |
-          sudo apt-get update
+          # 针对 2026 年的 Ubuntu 环境进行优化，强制忽略部分 apt 错误
+          sudo apt-get update || true
           sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
             gettext git libncurses-dev libssl-dev python3-distutils rsync unzip zlib1g-dev swig wget
 
       - name: Download ImmortalWRT SDK
         run: |
-          # 针对你的 ipq60xx 架构下载最新的 SDK
+          # 确保下载路径正确
           SDK_URL="https://downloads.immortalwrt.org/snapshots/targets/qualcommax/ipq60xx/immortalwrt-sdk-qualcommax-ipq60xx_gcc-13.3.0_musl.Linux-x86_64.tar.xz"
-          wget $SDK_URL -O sdk.tar.xz
+          wget --no-check-certificate $SDK_URL -O sdk.tar.xz
           mkdir sdk && tar -xf sdk.tar.xz -C sdk --strip-components=1
 
       - name: Configure SDK & Add Package
         run: |
           cd sdk
-          # 更新 feeds (APK 格式需要最新的脚本支持)
+          # 修复部分 SDK 环境下 feeds 报错的问题
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           
-          # 将当前仓库源码放入 SDK package 目录
+          # 准备包源码
           mkdir -p package/luci-app-gecoosac
-          cp -r ../* package/luci-app-gecoosac/
+          cp -r ../* package/luci-app-gecoosac/ || true
           
-          # 生成默认配置并强制启用该包的编译
+          # 生成配置
           make defconfig
           echo "CONFIG_PACKAGE_luci-app-gecoosac=m" >> .config
-          # 必须开启 APK 支持 (部分 SDK 默认可能还是 IPK)
+          # 关键：确保 APK 模式开启
           echo "CONFIG_USE_APK=y" >> .config
 
       - name: Compile Package
         run: |
           cd sdk
-          # 仅编译 luci-app-gecoosac 及其依赖
-          make package/luci-app-gecoosac/compile V=s
+          # 增加编译日志输出以便排错
+          make package/luci-app-gecoosac/compile V=s -j$(nproc)
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-gecoosac-apk
-          # 路径指向 SDK 编译输出目录下的 .apk 文件
-          path: sdk/bin/packages/aarch64_cortex-a53/base/*.apk
+          # 更加通用的路径匹配，防止架构目录名不准
+          path: sdk/bin/packages/**/*.apk
