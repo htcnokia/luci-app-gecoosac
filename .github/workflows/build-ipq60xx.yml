@@ -37,13 +37,19 @@ jobs:
       - name: Add Package & Configure
         run: |
           cd sdk
+          
+          # 1. 更新 feeds
           ./scripts/feeds update -a
           ./scripts/feeds install luci-base
           
+          # 2. 准备插件目录
           mkdir -p package/luci-app-gecoosac
-          cp -r ../* package/luci-app-gecoosac/
+          
+          # 3. 修复后的拷贝命令：排除 sdk 目录本身
+          # 使用 rsync 可以非常方便地排除特定文件夹
+          rsync -av --exclude='sdk' ../* package/luci-app-gecoosac/
 
-          # 强制开启 APK 模式
+          # 4. 强制配置为 APK 模式
           cat > .config <<EOF
           CONFIG_TARGET_qualcommax=y
           CONFIG_TARGET_qualcommax_ipq60xx=y
