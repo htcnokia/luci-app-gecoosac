@@ -1,0 +1,80 @@
+name: Build Gecoosac APK with Chinese i18n (x86_64)
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gettext git \
+            libncurses-dev libssl-dev python3-setuptools python3-dev rsync unzip \
+            zlib1g-dev swig wget file qdbus-qt5 zstd
+
+      - name: Download ImmortalWrt x86_64 SDK
+        run: |
+          # 86_64 镜像源
+          BASE_URL="https://downloads.immortalwrt.org/snapshots/targets/x86/64/"
+          SDK_FILENAME=$(wget -qO- $BASE_URL | grep -oE 'immortalwrt-sdk-[^">]+\.tar\.zst' | head -n 1)
+          
+          if [ -z "$SDK_FILENAME" ]; then
+            echo "Error: Cannot find SDK on $BASE_URL"
+            exit 1
+          fi
+          
+          echo "Found SDK: $SDK_FILENAME"
+          wget "${BASE_URL}${SDK_FILENAME}" -O sdk.tar.zst
+          
+          mkdir sdk
+          zstd -d sdk.tar.zst -c | tar -xf - -C sdk --strip-components=1
+
+      - name: Add Package & Configure
+        run: |
+          cd sdk
+          
+          # 1. 更新并安装基础 feeds，这是生成语言包的前提
+          ./scripts/feeds update -a
+          ./scripts/feeds install luci-base
+          
+          # 2. 准备插件目录
+          mkdir -p package/gecoosac
+          rsync -av --exclude='sdk' ../* package/gecoosac/
+
+          # 3. 针对 x86_64 与 APK 模式的配置
+          cat > .config <<EOF
+          CONFIG_TARGET_x86=y
+          CONFIG_TARGET_x86_64=y
+          CONFIG_USE_APK=y
+          EOF
+          
+          # 让 SDK 自动根据 package 目录里的 Makefile 补齐依赖和语言包
+          make defconfig
+
+      - name: Compile
+        run: |
+          cd sdk
+          # 编译整个 gecoosac 文件夹下的所有核心包和其携带的 i18n 语言包
+          make package/gecoosac/compile -j$(nproc) V=s
+
+      - name: Debug Output
+        run: |
+          echo "Checking for all x86_64 APK files..."
+          find sdk/bin/packages/ -name "*.apk"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gecoosac-x86_64-apk-full
+          path: |
+            sdk/bin/packages/**/*.apk
